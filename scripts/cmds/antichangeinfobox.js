@@ -39,11 +39,11 @@ module.exports = {
       antiChangeThemeOff: "Theme lock removed ❎",
       antiChangeEmojiOn: "Emoji locked ✅",
       antiChangeEmojiOff: "Emoji lock removed ❎",
-      antiChangeAvatarAlreadyOn: "Avatar is locked. Reverting...",
-      antiChangeNameAlreadyOn: "Name is locked. Reverting...",
-      antiChangeNicknameAlreadyOn: "Nickname is locked. Reverting...",
-      antiChangeThemeAlreadyOn: "Theme is locked. Reverting...",
-      antiChangeEmojiAlreadyOn: "Emoji is locked. Reverting..."
+      antiChangeAvatarAlreadyOn: " ",
+      antiChangeNameAlreadyOn: " ",
+      antiChangeNicknameAlreadyOn: " ",
+      antiChangeThemeAlreadyOn: " ",
+      antiChangeEmojiAlreadyOn: " "
     }
   },
 
