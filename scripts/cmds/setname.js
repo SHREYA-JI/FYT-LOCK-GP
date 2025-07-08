@@ -1,10 +1,17 @@
+const fs = require("fs-extra");
+const path = require("path");
+
+const autoSetnamePath = path.join(__dirname, "../data/setnameAuto.json");
+
+// Shortcut replace
 async function checkShortCut(nickname, uid, usersData) {
 	try {
-		/\{userName\}/gi.test(nickname) ? nickname = nickname.replace(/\{userName\}/gi, await usersData.getName(uid)) : null;
-		/\{userID\}/gi.test(nickname) ? nickname = nickname.replace(/\{userID\}/gi, uid) : null;
+		if (/\{userName\}/gi.test(nickname))
+			nickname = nickname.replace(/\{userName\}/gi, await usersData.getName(uid));
+		if (/\{userID\}/gi.test(nickname))
+			nickname = nickname.replace(/\{userID\}/gi, uid);
 		return nickname;
-	}
-	catch (e) {
+	} catch (e) {
 		return nickname;
 	}
 }
@@ -12,68 +19,66 @@ async function checkShortCut(nickname, uid, usersData) {
 module.exports = {
 	config: {
 		name: "setname",
-		version: "1.5",
-		author: "NTKhang",
+		version: "2.0",
+		author: "NTKhang + ChatGPT",
 		countDown: 5,
 		role: 0,
 		description: {
-			vi: "Đổi biệt danh của tất cả thành viên trong nhóm chat hoặc những thành viên được tag theo một định dạng",
-			en: "Change nickname of all members in chat or members tagged by a format"
+			en: "Change nickname of all members or auto-change new members",
 		},
 		category: "box chat",
 		guide: {
-			vi: {
-				body: "   {pn} <nick name>: thay đổi biệt danh của bản thân"
-					+ "\n   {pn} @tags <nick name>: thay đổi biệt danh của những thành viên được tag"
-					+ "\n   {pn} all <nick name>: thay đổi biệt danh của tất cả thành viên trong nhóm chat"
-					+ "\n\n   Với các shortcut có sẵn:"
-					+ "\n   + {userName}: tên của thành viên"
-					+ "\n   + {userID}: ID của thành viên"
-					+ "\n\n   Ví dụ: (xem ảnh)",
-				attachment: {
-					[`${__dirname}/assets/guide/setname_1.png`]: "https://i.ibb.co/gFh23zb/guide1.png",
-					[`${__dirname}/assets/guide/setname_2.png`]: "https://i.ibb.co/BNWHKgj/guide2.png"
-				}
-			},
-			en: {
-				body: "   {pn} <nick name>: change nickname of yourself"
-					+ "\n   {pn} @tags <nick name>: change nickname of members tagged"
-					+ "\n   {pn} all <nick name>: change nickname of all members in chat"
-					+ "\n\nWith available shortcuts:"
-					+ "\n   + {userName}: name of member"
-					+ "\n   + {userID}: ID of member"
-					+ "\n\n   Example: (see image)",
-				attachment: {
-					[`${__dirname}/assets/guide/setname_1.png`]: "https://i.ibb.co/gFh23zb/guide1.png",
-					[`${__dirname}/assets/guide/setname_2.png`]: "https://i.ibb.co/BNWHKgj/guide2.png"
-				}
-			}
+			en: "   {pn} <nickname>: Change your nickname\n"
+				+ "   {pn} @tags <nickname>: Change nickname of tagged members\n"
+				+ "   {pn} all <nickname>: Change nickname of all members and auto-set for new ones\n"
+				+ "   {pn} stop: Stop auto-changing nickname in this group\n\n"
+				+ "Shortcuts:\n"
+				+ "   {userName}: Member's name\n"
+				+ "   {userID}: Member's ID"
 		}
 	},
 
 	langs: {
-		vi: {
-			error: "Đã có lỗi xảy ra, thử tắt tính năng liên kết mời trong nhóm và thử lại sau"
-		},
 		en: {
-			error: "An error has occurred, try turning off the invite link feature in the group and try again later"
+			error: "An error occurred, try again later.",
+			stopped: "✅ Auto nickname change has been disabled for this group.",
+			started: "✅ Auto nickname change is now enabled for this group.",
 		}
 	},
 
 	onStart: async function ({ args, message, event, api, usersData, getLang }) {
+		await fs.ensureFile(autoSetnamePath);
+		let data = {};
+		if (fs.existsSync(autoSetnamePath))
+			data = JSON.parse(fs.readFileSync(autoSetnamePath));
+
+		if (!args[0]) return message.reply("Please provide arguments.");
+
+		// Stop auto-change
+		if (args[0].toLowerCase() === "stop") {
+			delete data[event.threadID];
+			fs.writeFileSync(autoSetnamePath, JSON.stringify(data, null, 2));
+			return message.reply(getLang("stopped"));
+		}
+
 		const mentions = Object.keys(event.mentions);
 		let uids = [];
 		let nickname = args.join(" ");
 
-		if (args[0] === "all" || mentions.includes(event.threadID)) {
+		if (args[0] === "all") {
 			uids = (await api.getThreadInfo(event.threadID)).participantIDs;
-			nickname = args[0] === "all" ? args.slice(1).join(" ") : nickname.replace(event.mentions[event.threadID], "").trim();
+			nickname = args.slice(1).join(" ").trim();
+
+			// Save auto-change config
+			data[event.threadID] = nickname;
+			fs.writeFileSync(autoSetnamePath, JSON.stringify(data, null, 2));
+			message.reply(getLang("started"));
 		}
 		else if (mentions.length) {
 			uids = mentions;
 			const allName = new RegExp(
 				Object.values(event.mentions)
-					.map(name => name.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")) // fix error when name has special characters
+					.map(name => name.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"))
 					.join("|")
 				, "g"
 			);
@@ -85,14 +90,33 @@ module.exports = {
 		}
 
 		try {
-			const uid = uids.shift();
-			await api.changeNickname(await checkShortCut(nickname, uid, usersData), event.threadID, uid);
+			for (const uid of uids)
+				await api.changeNickname(await checkShortCut(nickname, uid, usersData), event.threadID, uid);
 		}
 		catch (e) {
+			console.error(e);
 			return message.reply(getLang("error"));
 		}
+	},
 
-		for (const uid of uids)
-			await api.changeNickname(await checkShortCut(nickname, uid, usersData), event.threadID, uid);
+	// Event listener for new members
+	onEvent: async function ({ event, api, usersData }) {
+		if (event.logMessageType !== "log:subscribe") return;
+		if (!fs.existsSync(autoSetnamePath)) return;
+
+		const data = JSON.parse(fs.readFileSync(autoSetnamePath));
+		const nicknameFormat = data[event.threadID];
+		if (!nicknameFormat) return;
+
+		for (const newMember of event.logMessageData.addedParticipants) {
+			const uid = newMember.userFbId;
+			try {
+				const nickname = await checkShortCut(nicknameFormat, uid, usersData);
+				await api.changeNickname(nickname, event.threadID, uid);
+			}
+			catch (e) {
+				console.error(e);
+			}
+		}
 	}
 };
