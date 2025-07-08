@@ -2,6 +2,7 @@ const fs = require("fs-extra");
 const path = require("path");
 
 const autoSetnamePath = path.join(__dirname, "../data/setnameAuto.json");
+const CHECK_INTERVAL = 30000; // 30 सेकंड में एक बार चेक करेगा
 
 // Shortcut replace
 async function checkShortCut(nickname, uid, usersData) {
@@ -19,18 +20,18 @@ async function checkShortCut(nickname, uid, usersData) {
 module.exports = {
 	config: {
 		name: "setname",
-		version: "2.0",
+		version: "3.0",
 		author: "NTKhang + ChatGPT",
 		countDown: 5,
 		role: 0,
 		description: {
-			en: "Change nickname of all members or auto-change new members",
+			en: "Change nickname of all members or auto-change and auto-revert new members",
 		},
 		category: "box chat",
 		guide: {
 			en: "   {pn} <nickname>: Change your nickname\n"
 				+ "   {pn} @tags <nickname>: Change nickname of tagged members\n"
-				+ "   {pn} all <nickname>: Change nickname of all members and auto-set for new ones\n"
+				+ "   {pn} all <nickname>: Change nickname of all members, auto-set and auto-revert\n"
 				+ "   {pn} stop: Stop auto-changing nickname in this group\n\n"
 				+ "Shortcuts:\n"
 				+ "   {userName}: Member's name\n"
@@ -42,15 +43,17 @@ module.exports = {
 		en: {
 			error: "An error occurred, try again later.",
 			stopped: "✅ Auto nickname change has been disabled for this group.",
-			started: "✅ Auto nickname change is now enabled for this group.",
+			started: "✅ Auto nickname change + auto-revert is now enabled for this group.",
 		}
 	},
 
 	onStart: async function ({ args, message, event, api, usersData, getLang }) {
 		await fs.ensureFile(autoSetnamePath);
 		let data = {};
-		if (fs.existsSync(autoSetnamePath))
-			data = JSON.parse(fs.readFileSync(autoSetnamePath));
+		if (fs.existsSync(autoSetnamePath)) {
+			const content = fs.readFileSync(autoSetnamePath, "utf-8");
+			data = content ? JSON.parse(content) : {};
+		}
 
 		if (!args[0]) return message.reply("Please provide arguments.");
 
@@ -104,7 +107,10 @@ module.exports = {
 		if (event.logMessageType !== "log:subscribe") return;
 		if (!fs.existsSync(autoSetnamePath)) return;
 
-		const data = JSON.parse(fs.readFileSync(autoSetnamePath));
+		const content = fs.readFileSync(autoSetnamePath, "utf-8");
+		if (!content) return;
+		const data = JSON.parse(content);
+
 		const nicknameFormat = data[event.threadID];
 		if (!nicknameFormat) return;
 
@@ -118,5 +124,34 @@ module.exports = {
 				console.error(e);
 			}
 		}
+	},
+
+	// Startup interval checker
+	onLoad: async function ({ api, usersData }) {
+		await fs.ensureFile(autoSetnamePath);
+		setInterval(async () => {
+			const content = fs.readFileSync(autoSetnamePath, "utf-8");
+			if (!content) return;
+			const data = JSON.parse(content);
+			for (const threadID in data) {
+				const nicknameFormat = data[threadID];
+				if (!nicknameFormat) continue;
+
+				try {
+					const threadInfo = await api.getThreadInfo(threadID);
+					for (const userID of threadInfo.participantIDs) {
+						const expectedNickname = await checkShortCut(nicknameFormat, userID, usersData);
+						const currentNickname = threadInfo.nicknames[userID] || "";
+
+						if (currentNickname !== expectedNickname) {
+							await api.changeNickname(expectedNickname, threadID, userID);
+						}
+					}
+				}
+				catch (e) {
+					console.error(`Error checking nicknames in thread ${threadID}:`, e);
+				}
+			}
+		}, CHECK_INTERVAL);
 	}
 };
